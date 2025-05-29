@@ -1,0 +1,11 @@
+﻿def process_data(data_type):
+    # ... 其他代码不变
+    
+    try:
+        # 新增路径检查
+        if not input_path.exists():
+            raise FileNotFoundError(f"文件 {input_path.name} 不存在于当前目录")
+            
+        # ... 原有处理逻辑
+    except Exception as e:
+        print(f"❌ {data_type} 数据处理失败：{str(e)}")
