@@ -1,2 +1,3 @@
-#!/bin/bash
-# 通常不需要特殊设置
+"#!/bin/bash" 
+"pip install --upgrade pip" 
+"pip install -r requirements.txt" 
