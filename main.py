@@ -1,6 +1,6 @@
 ﻿import streamlit as st
 import pandas as pd
-from dotenv import load_dotenv
+import sys
 import os
 from pathlib import Path
 import time
@@ -8,79 +8,37 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import webbrowser
 
-# -------------------- 页面配置必须放在最前面 --------------------
+# -------------------- 路径配置必须放在最前面 --------------------
+# 获取当前文件所在目录
+current_dir = Path(__file__).parent
+
+# -------------------- 页面配置 --------------------
 st.set_page_config(page_title="韶关AI旅游助手", layout="wide")
 
 # -------------------- 初始化设置 --------------------
 print("[DEBUG] 当前工作目录:", os.getcwd())
-data_path = Path("data/sg_attractions_cleaned.csv")
-print("[DEBUG] 文件绝对路径:", data_path.absolute())
-print("[DEBUG] 文件是否存在:", data_path.exists())
+print("[DEBUG] 当前文件目录:", current_dir)
+
+# 构建数据文件路径
+data_dir = current_dir / "data"
+attractions_path = data_dir / "sg_attractions_cleaned.csv"
+food_path = data_dir / "sg_food_cleaned.csv"
+culture_path = data_dir / "sg_culture_cleaned.csv"
+
+print("[DEBUG] 景点文件路径:", attractions_path)
+print("[DEBUG] 美食文件路径:", food_path)
+print("[DEBUG] 文化文件路径:", culture_path)
 
 # -------------------- 环境变量处理 --------------------
-load_dotenv()  # 加载 .env 文件
-
-# 调试信息 - 检查环境变量和Secrets
+# 在 Streamlit Cloud 上只使用 secrets
 print("[DEBUG] 尝试获取 DeepSeek API 密钥...")
+deepseek_api_key = st.secrets.get("DEEPSEEK_KEY", None)
 
-# 打印相关环境变量
-print("[DEBUG] 环境变量列表:")
-for key, value in os.environ.items():
-    if "DEEPSEEK" in key or "KEY" in key:
-        print(f"  {key}: {value}")
-
-# 尝试访问 secrets
-try:
-    print("[DEBUG] 尝试访问 Streamlit Secrets")
-    print(f"[DEBUG] 可用的 Secrets 键: {list(st.secrets.keys())}")
-    if "DEEPSEEK_KEY" in st.secrets:
-        print(f"[DEBUG] 找到 DEEPSEEK_KEY: {st.secrets['DEEPSEEK_KEY'][:4]}...")
-except Exception as e:
-    print(f"[ERROR] 访问 Secrets 失败: {str(e)}")
-
-# 尝试从多个来源获取 DeepSeek API 密钥
-deepseek_api_key = None
-key_sources = []
-
-# 1. 尝试从环境变量获取
-if os.getenv("DEEPSEEK_API_KEY"):
-    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-    key_sources.append("环境变量 (DEEPSEEK_API_KEY)")
-    print("[DEBUG] 从环境变量 DEEPSEEK_API_KEY 获取密钥")
-
-if not deepseek_api_key and os.getenv("DEEPSEEK_KEY"):
-    deepseek_api_key = os.getenv("DEEPSEEK_KEY")
-    key_sources.append("环境变量 (DEEPSEEK_KEY)")
-    print("[DEBUG] 从环境变量 DEEPSEEK_KEY 获取密钥")
-
-# 2. 尝试从 Streamlit Secrets 获取
-try:
-    if st.secrets.get("DEEPSEEK_KEY"):
-        deepseek_api_key = st.secrets.get("DEEPSEEK_KEY")
-        key_sources.append("Streamlit Secrets")
-        print("[DEBUG] 从 Streamlit Secrets 获取密钥")
-except Exception as secrets_error:
-    print(f"[WARNING] Streamlit Secrets 访问失败: {str(secrets_error)}")
-
-# 3. 尝试从 .env 文件获取（dotenv 已加载）
-if not deepseek_api_key and os.getenv("DEEPSEEK_API_KEY"):
-    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-    key_sources.append(".env 文件")
-    print("[DEBUG] 从 .env 文件获取密钥")
-
-# 4. 如果以上都没有，将在侧边栏让用户输入
 if not deepseek_api_key:
-    st.warning("⚠️ 未找到 DeepSeek API 密钥")
-    st.info("""
-        **请提供您的 DeepSeek API 密钥：**
-        1. 在侧边栏输入密钥
-        2. 或创建 secrets.toml 文件
-        3. 或设置环境变量
-        
-        [获取 DeepSeek API 密钥](https://platform.deepseek.com/)
-    """)
-    key_sources.append("用户输入")
-    print("[WARNING] 未找到任何来源的 API 密钥")
+    st.error("未找到 DeepSeek API 密钥，请检查 Streamlit Secrets 设置")
+    st.stop()
+else:
+    print(f"[DEBUG] 从 Streamlit Secrets 获取密钥: {deepseek_api_key[:4]}...")
 
 # -------------------- DeepSeek API 配置 --------------------
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1"
@@ -96,21 +54,7 @@ with st.sidebar:
     st.divider()
     st.header("API设置")
     
-    # 如果尚未获取到密钥，显示输入框
-    if not deepseek_api_key:
-        deepseek_api_key = st.text_input(
-            "🔑 输入 DeepSeek API 密钥", 
-            type="password",
-            help="可在 https://platform.deepseek.com/ 获取"
-        )
-        if not deepseek_api_key:
-            st.error("请提供 API 密钥以继续")
-            st.stop()
-        st.success("✅ API 密钥已输入")
-        key_sources = ["用户输入"]  # 重置来源
-    else:
-        st.success(f"✅ API 密钥已通过 {', '.join(key_sources)} 获取")
-    
+    st.success(f"✅ API 密钥已通过 Streamlit Secrets 获取")
     st.info(f"当前模型: {MODEL_NAME}")
     
     # 使用按钮代替 link_button
@@ -118,20 +62,13 @@ with st.sidebar:
         webbrowser.open_new_tab("https://platform.deepseek.com/api")
         st.toast("已在浏览器中打开 DeepSeek API 文档")
     
-    # 添加创建 secrets.toml 的说明
+    # 添加 Streamlit Cloud 说明
     st.divider()
     st.markdown("""
-        **创建 secrets.toml 文件:**
-        1. 在项目根目录创建 `.streamlit` 文件夹
-        2. 在 `.streamlit` 文件夹中创建 `secrets.toml` 文件
-        3. 添加以下内容:
-        ```
-        DEEPSEEK_KEY = "您的API密钥"
-        ```
-    """)
-    st.markdown(f"""
-        **当前项目路径:** `{os.getcwd()}`
-        **Secrets 预期路径:** `{os.getcwd()}\\.streamlit\\secrets.toml`
+        **Streamlit Cloud 说明:**
+        1. API 密钥通过 Secrets 管理
+        2. 所有数据文件必须上传到 GitHub
+        3. 文件路径已适配云端环境
     """)
 
 # 创建 DeepSeek API 客户端
@@ -175,11 +112,7 @@ class DeepSeekClient:
             raise
 
 # 创建客户端实例
-if deepseek_api_key:
-    client = DeepSeekClient(api_key=deepseek_api_key)
-else:
-    st.error("未设置 API 密钥，无法创建客户端")
-    st.stop()
+client = DeepSeekClient(api_key=deepseek_api_key)
 
 # 测试 API 连接
 try:
@@ -213,7 +146,7 @@ def load_and_preprocess_data():
         print("[DEBUG] 加载景点数据...")
         # 景点数据
         attractions = pd.read_csv(
-            "data/sg_attractions_cleaned.csv",
+            attractions_path,
             encoding="utf-8-sig",
             engine="python",
             on_bad_lines="warn"
@@ -225,7 +158,7 @@ def load_and_preprocess_data():
         print("[DEBUG] 加载美食数据...")
         # 美食数据
         foods = pd.read_csv(
-            "data/sg_food_cleaned.csv",
+            food_path,
             encoding="utf-8-sig",
             engine="python",
             on_bad_lines="warn"
@@ -237,7 +170,7 @@ def load_and_preprocess_data():
         print("[DEBUG] 加载文化数据...")
         # 文化数据
         culture = pd.read_csv(
-            "data/sg_culture_cleaned.csv",
+            culture_path,
             encoding="utf-8-sig",
             engine="python",
             on_bad_lines="warn"
@@ -249,6 +182,10 @@ def load_and_preprocess_data():
 
     except Exception as e:
         st.error(f"数据加载失败：{str(e)}")
+        # 添加详细错误信息
+        st.error(f"文件路径: {attractions_path}")
+        st.error(f"当前目录内容: {os.listdir(current_dir)}")
+        st.error(f"data目录内容: {os.listdir(data_dir) if os.path.exists(data_dir) else '目录不存在'}")
         st.stop()
 
 # 加载数据
@@ -315,7 +252,8 @@ def build_prompt(days, budget, interest):
     """构建 DeepSeek 提示词模板"""
     try:
         print("[DEBUG] 构建提示词...")
-        with open("prompt_template.txt", "r", encoding="utf-8") as f:
+        template_path = current_dir / "prompt_template.txt"
+        with open(template_path, "r", encoding="utf-8") as f:
             template = f.read()
 
         # 安全抽样景点（最多3个）
@@ -411,18 +349,18 @@ if st.button("✨ 一键生成攻略", key="generate_button"):
                 st.toast("已在浏览器中打开 DeepSeek API 文档")
 
 # -------------------- 调试信息 --------------------
-print("[DEBUG] 景点数据样例：\n", attractions.head(2).to_string())
-print("[DEBUG] 美食数据样例：\n", foods.sample(2).to_string())
-if len(culture) > 0:
-    print("[DEBUG] 文化数据样例：\n", culture.sample(1).to_string())
-else:
-    print("[DEBUG] 无文化数据")
-    
+# 添加文件路径显示
+st.sidebar.divider()
+st.sidebar.subheader("调试信息")
+st.sidebar.write(f"当前目录: {current_dir}")
+st.sidebar.write(f"数据目录: {data_dir}")
+
 # 添加页脚
 st.divider()
 st.markdown("""
     <div style="text-align: center; color: #666; margin-top: 30px;">
-        <p>韶关 AI 旅游助手 v1.3 | 技术支持: 韶关市旅游局</p>
+        <p>韶关 AI 旅游助手 v1.4 | 技术支持: 韶关市旅游局</p>
         <p>© 2025 韶关智慧旅游项目 | 使用 DeepSeek API</p>
+        <p>部署环境: Streamlit Cloud</p>
     </div>
 """, unsafe_allow_html=True)
